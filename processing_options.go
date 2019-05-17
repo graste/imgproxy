@@ -11,12 +11,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/valyala/fasthttp"
 )
 
 type urlOptions map[string][]string
@@ -234,7 +233,7 @@ func decodeBase64URL(parts []string) (string, string, error) {
 		return "", "", errInvalidURLEncoding
 	}
 
-	fullURL := fmt.Sprintf("%s%s", conf.BaseURL, imageURL)
+	fullURL := fmt.Sprintf("%s%s", conf.BaseURL, string(imageURL))
 
 	if _, err := url.ParseRequestURI(fullURL); err != nil {
 		return "", "", errInvalidImageURL
@@ -259,7 +258,7 @@ func decodePlainURL(parts []string) (string, string, error) {
 	if unescaped, err := url.PathUnescape(urlParts[0]); err == nil {
 		fullURL := fmt.Sprintf("%s%s", conf.BaseURL, unescaped)
 		if _, err := url.ParseRequestURI(fullURL); err == nil {
-			return fmt.Sprintf("%s%s", conf.BaseURL, unescaped), format, nil
+			return fullURL, format, nil
 		}
 	}
 
@@ -297,7 +296,7 @@ func applyHeightOption(po *processingOptions, args []string) error {
 		return fmt.Errorf("Invalid height arguments: %v", args)
 	}
 
-	if h, err := strconv.Atoi(args[0]); err == nil && po.Height >= 0 {
+	if h, err := strconv.Atoi(args[0]); err == nil && h >= 0 {
 		po.Height = h
 	} else {
 		return fmt.Errorf("Invalid height: %s", args[0])
@@ -522,7 +521,8 @@ func applyPresetOption(po *processingOptions, args []string) error {
 	for _, preset := range args {
 		if p, ok := conf.Presets[preset]; ok {
 			if po.isPresetUsed(preset) {
-				return fmt.Errorf("Recursive preset usage is detected: %s", preset)
+				logWarning("Recursive preset usage is detected: %s", preset)
+				continue
 			}
 
 			po.presetUsed(preset)
@@ -803,6 +803,33 @@ func parsePathAdvanced(parts []string, headers *processingHeaders) (string, *pro
 	return url, po, nil
 }
 
+func parsePathPresets(parts []string, headers *processingHeaders) (string, *processingOptions, error) {
+	po, err := defaultProcessingOptions(headers)
+	if err != nil {
+		return "", po, err
+	}
+
+	presets := strings.Split(parts[0], ":")
+	urlParts := parts[1:]
+
+	if err := applyPresetOption(po, presets); err != nil {
+		return "", nil, err
+	}
+
+	url, extension, err := decodeURL(urlParts)
+	if err != nil {
+		return "", po, err
+	}
+
+	if len(extension) > 0 {
+		if err := applyFormatOption(po, []string{extension}); err != nil {
+			return "", po, err
+		}
+	}
+
+	return url, po, nil
+}
+
 func parsePathBasic(parts []string, headers *processingHeaders) (string, *processingOptions, error) {
 	var err error
 
@@ -847,8 +874,11 @@ func parsePathBasic(parts []string, headers *processingHeaders) (string, *proces
 	return url, po, nil
 }
 
-func parsePath(ctx context.Context, rctx *fasthttp.RequestCtx) (context.Context, error) {
-	path := string(rctx.Request.URI().PathOriginal())
+func parsePath(ctx context.Context, r *http.Request) (context.Context, error) {
+	path := r.URL.RawPath
+	if len(path) == 0 {
+		path = r.URL.Path
+	}
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
 
 	if len(parts) < 3 {
@@ -862,17 +892,19 @@ func parsePath(ctx context.Context, rctx *fasthttp.RequestCtx) (context.Context,
 	}
 
 	headers := &processingHeaders{
-		Accept:        string(rctx.Request.Header.Peek("Accept")),
-		Width:         string(rctx.Request.Header.Peek("Width")),
-		ViewportWidth: string(rctx.Request.Header.Peek("Viewport-Width")),
-		DPR:           string(rctx.Request.Header.Peek("DPR")),
+		Accept:        r.Header.Get("Accept"),
+		Width:         r.Header.Get("Width"),
+		ViewportWidth: r.Header.Get("Viewport-Width"),
+		DPR:           r.Header.Get("DPR"),
 	}
 
 	var imageURL string
 	var po *processingOptions
 	var err error
 
-	if _, ok := resizeTypes[parts[1]]; ok {
+	if conf.OnlyPresets {
+		imageURL, po, err = parsePathPresets(parts[1:], headers)
+	} else if _, ok := resizeTypes[parts[1]]; ok {
 		imageURL, po, err = parsePathBasic(parts[1:], headers)
 	} else {
 		imageURL, po, err = parsePathAdvanced(parts[1:], headers)

@@ -169,6 +169,7 @@ type config struct {
 	UserAgent string
 
 	IgnoreSslVerification bool
+	DevelopmentErrorsMode bool
 
 	LocalFileSystemRoot string
 	S3Enabled           bool
@@ -180,7 +181,8 @@ type config struct {
 
 	BaseURL string
 
-	Presets presets
+	Presets     presets
+	OnlyPresets bool
 
 	WatermarkData    string
 	WatermarkPath    string
@@ -202,6 +204,7 @@ type config struct {
 
 	FreeMemoryInterval             int
 	DownloadBufferSize             int
+	GZipBufferSize                 int
 	BufferPoolCalibrationThreshold int
 }
 
@@ -230,6 +233,7 @@ var conf = config{
 	SentryRelease:                  fmt.Sprintf("imgproxy/%s", version),
 	FreeMemoryInterval:             10,
 	BufferPoolCalibrationThreshold: 1024,
+	OnlyPresets:                    false,
 }
 
 func init() {
@@ -292,6 +296,7 @@ func init() {
 	strEnvConfig(&conf.UserAgent, "IMGPROXY_USER_AGENT")
 
 	boolEnvConfig(&conf.IgnoreSslVerification, "IMGPROXY_IGNORE_SSL_VERIFICATION")
+	boolEnvConfig(&conf.DevelopmentErrorsMode, "IMGPROXY_DEVELOPMENT_ERRORS_MODE")
 
 	strEnvConfig(&conf.LocalFileSystemRoot, "IMGPROXY_LOCAL_FILESYSTEM_ROOT")
 
@@ -308,6 +313,7 @@ func init() {
 	conf.Presets = make(presets)
 	presetEnvConfig(conf.Presets, "IMGPROXY_PRESETS")
 	presetFileConfig(conf.Presets, *presetsPath)
+	boolEnvConfig(&conf.OnlyPresets, "IMGPROXY_ONLY_PRESETS")
 
 	strEnvConfig(&conf.WatermarkData, "IMGPROXY_WATERMARK_DATA")
 	strEnvConfig(&conf.WatermarkPath, "IMGPROXY_WATERMARK_PATH")
@@ -329,6 +335,7 @@ func init() {
 
 	intEnvConfig(&conf.FreeMemoryInterval, "IMGPROXY_FREE_MEMORY_INTERVAL")
 	intEnvConfig(&conf.DownloadBufferSize, "IMGPROXY_DOWNLOAD_BUFFER_SIZE")
+	intEnvConfig(&conf.GZipBufferSize, "IMGPROXY_GZIP_BUFFER_SIZE")
 	intEnvConfig(&conf.BufferPoolCalibrationThreshold, "IMGPROXY_BUFFER_POOL_CALIBRATION_THRESHOLD")
 
 	if len(conf.Keys) != len(conf.Salts) {
@@ -451,6 +458,12 @@ func init() {
 		logFatal("Download buffer size should be greater than or equal to 0")
 	} else if conf.DownloadBufferSize > int(^uint32(0)) {
 		logFatal("Download buffer size can't be greater than %d", ^uint32(0))
+	}
+
+	if conf.GZipBufferSize < 0 {
+		logFatal("GZip buffer size should be greater than or equal to 0")
+	} else if conf.GZipBufferSize > int(^uint32(0)) {
+		logFatal("GZip buffer size can't be greater than %d", ^uint32(0))
 	}
 
 	if conf.BufferPoolCalibrationThreshold < 64 {

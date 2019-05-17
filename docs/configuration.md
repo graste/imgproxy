@@ -61,6 +61,10 @@ When you use imgproxy in a development environment, it can be useful to ignore S
 
 * `IMGPROXY_IGNORE_SSL_VERIFICATION`: when true, disables SSL verification, so imgproxy can be used in a development environment with self-signed SSL certificates.
 
+Also you may want imgproxy to respond with the same error message that it writes to the log:
+
+* `IMGPROXY_DEVELOPMENT_ERRORS_MODE`: when true, imgproxy will respond with detailed error messages. Not recommended for production because some errors may contain stack trace.
+
 ### Compression
 
 * `IMGPROXY_QUALITY`: default quality of the resulting image, percentage. Default: `80`;
@@ -107,6 +111,7 @@ There are two ways to define presets:
 ##### Using an environment variable
 
 * `IMGPROXY_PRESETS`: set of preset definitions, comma-divided. Example: `default=resizing_type:fill/enlarge:1,sharp=sharpen:0.7,blurry=blur:2`. Default: blank.
+* `IMGPROXY_ONLY_PRESETS`: disable all URL formats but presets. In this case, you always need to inform a valid preset. Example: `http://imgproxy.example.com/unsafe/thumbnail/plain/http://example.com/images/curiosity.jpg@png`
 
 ##### Using a command line argument
 
