@@ -36,7 +36,6 @@ func strEnvConfig(s *string, name string) {
 }
 
 func boolEnvConfig(b *bool, name string) {
-	*b = false
 	if env, err := strconv.ParseBool(os.Getenv(name)); err == nil {
 		*b = env
 	}
@@ -129,19 +128,20 @@ func presetFileConfig(p presets, filepath string) {
 }
 
 type config struct {
-	Bind            string
-	ReadTimeout     int
-	WaitTimeout     int
-	WriteTimeout    int
-	DownloadTimeout int
-	Concurrency     int
-	MaxClients      int
-	TTL             int
+	Bind             string
+	ReadTimeout      int
+	WriteTimeout     int
+	KeepAliveTimeout int
+	DownloadTimeout  int
+	Concurrency      int
+	MaxClients       int
+	TTL              int
+	SoReuseport      bool
 
-	MaxSrcDimension  int
-	MaxSrcResolution int
-	MaxSrcFileSize   int
-	MaxGifFrames     int
+	MaxSrcDimension    int
+	MaxSrcResolution   int
+	MaxSrcFileSize     int
+	MaxAnimationFrames int
 
 	JpegProgressive       bool
 	PngInterlaced         bool
@@ -212,20 +212,18 @@ var conf = config{
 	Bind:                           ":8080",
 	ReadTimeout:                    10,
 	WriteTimeout:                   10,
+	KeepAliveTimeout:               10,
 	DownloadTimeout:                5,
 	Concurrency:                    runtime.NumCPU() * 2,
 	TTL:                            3600,
-	IgnoreSslVerification:          false,
 	MaxSrcResolution:               16800000,
-	MaxGifFrames:                   1,
-	AllowInsecure:                  false,
+	MaxAnimationFrames:             1,
 	SignatureSize:                  32,
 	PngQuantizationColors:          256,
 	Quality:                        80,
 	GZipCompression:                5,
 	UserAgent:                      fmt.Sprintf("imgproxy/%s", version),
-	ETagEnabled:                    false,
-	S3Enabled:                      false,
+	Presets:                        make(presets),
 	WatermarkOpacity:               1,
 	BugsnagStage:                   "production",
 	HoneybadgerEnv:                 "production",
@@ -233,12 +231,9 @@ var conf = config{
 	SentryRelease:                  fmt.Sprintf("imgproxy/%s", version),
 	FreeMemoryInterval:             10,
 	BufferPoolCalibrationThreshold: 1024,
-	OnlyPresets:                    false,
 }
 
-func init() {
-	initSyslog()
-
+func configure() {
 	keyPath := flag.String("keypath", "", "path of the file with hex-encoded key")
 	saltPath := flag.String("saltpath", "", "path of the file with hex-encoded salt")
 	presetsPath := flag.String("presets", "", "path of the file with presets")
@@ -257,16 +252,24 @@ func init() {
 	strEnvConfig(&conf.Bind, "IMGPROXY_BIND")
 	intEnvConfig(&conf.ReadTimeout, "IMGPROXY_READ_TIMEOUT")
 	intEnvConfig(&conf.WriteTimeout, "IMGPROXY_WRITE_TIMEOUT")
+	intEnvConfig(&conf.KeepAliveTimeout, "IMGPROXY_KEEP_ALIVE_TIMEOUT")
 	intEnvConfig(&conf.DownloadTimeout, "IMGPROXY_DOWNLOAD_TIMEOUT")
 	intEnvConfig(&conf.Concurrency, "IMGPROXY_CONCURRENCY")
 	intEnvConfig(&conf.MaxClients, "IMGPROXY_MAX_CLIENTS")
 
 	intEnvConfig(&conf.TTL, "IMGPROXY_TTL")
 
+	boolEnvConfig(&conf.SoReuseport, "IMGPROXY_SO_REUSEPORT")
+
 	intEnvConfig(&conf.MaxSrcDimension, "IMGPROXY_MAX_SRC_DIMENSION")
 	megaIntEnvConfig(&conf.MaxSrcResolution, "IMGPROXY_MAX_SRC_RESOLUTION")
 	intEnvConfig(&conf.MaxSrcFileSize, "IMGPROXY_MAX_SRC_FILE_SIZE")
-	intEnvConfig(&conf.MaxGifFrames, "IMGPROXY_MAX_GIF_FRAMES")
+
+	if _, ok := os.LookupEnv("IMGPROXY_MAX_GIF_FRAMES"); ok {
+		logWarning("`IMGPROXY_MAX_GIF_FRAMES` is deprecated and will be removed in future versions. Use `IMGPROXY_MAX_ANIMATION_FRAMES` instead")
+		intEnvConfig(&conf.MaxAnimationFrames, "IMGPROXY_MAX_GIF_FRAMES")
+	}
+	intEnvConfig(&conf.MaxAnimationFrames, "IMGPROXY_MAX_ANIMATION_FRAMES")
 
 	boolEnvConfig(&conf.JpegProgressive, "IMGPROXY_JPEG_PROGRESSIVE")
 	boolEnvConfig(&conf.PngInterlaced, "IMGPROXY_PNG_INTERLACED")
@@ -310,7 +313,6 @@ func init() {
 
 	strEnvConfig(&conf.BaseURL, "IMGPROXY_BASE_URL")
 
-	conf.Presets = make(presets)
 	presetEnvConfig(conf.Presets, "IMGPROXY_PRESETS")
 	presetFileConfig(conf.Presets, *presetsPath)
 	boolEnvConfig(&conf.OnlyPresets, "IMGPROXY_ONLY_PRESETS")
@@ -365,6 +367,9 @@ func init() {
 	if conf.WriteTimeout <= 0 {
 		logFatal("Write timeout should be greater than 0, now - %d\n", conf.WriteTimeout)
 	}
+	if conf.KeepAliveTimeout < 0 {
+		logFatal("KeepAlive timeout should be greater than or equal to 0, now - %d\n", conf.KeepAliveTimeout)
+	}
 
 	if conf.DownloadTimeout <= 0 {
 		logFatal("Download timeout should be greater than 0, now - %d\n", conf.DownloadTimeout)
@@ -396,8 +401,8 @@ func init() {
 		logFatal("Max src file size should be greater than or equal to 0, now - %d\n", conf.MaxSrcFileSize)
 	}
 
-	if conf.MaxGifFrames <= 0 {
-		logFatal("Max GIF frames should be greater than 0, now - %d\n", conf.MaxGifFrames)
+	if conf.MaxAnimationFrames <= 0 {
+		logFatal("Max animation frames should be greater than 0, now - %d\n", conf.MaxAnimationFrames)
 	}
 
 	if conf.PngQuantizationColors < 2 {
@@ -469,10 +474,4 @@ func init() {
 	if conf.BufferPoolCalibrationThreshold < 64 {
 		logFatal("Buffer pool calibration threshold should be greater than or equal to 64")
 	}
-
-	initNewrelic()
-	initPrometheus()
-	initDownloading()
-	initErrorsReporting()
-	initVips()
 }

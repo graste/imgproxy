@@ -7,16 +7,25 @@ import (
 	"runtime/debug"
 	"syscall"
 	"time"
-
-	"net/http"
-	_ "net/http/pprof"
 )
 
-const version = "2.2.13"
+const version = "2.3.0"
 
 type ctxKey string
 
+func initialize() {
+	initSyslog()
+	configure()
+	initNewrelic()
+	initPrometheus()
+	initDownloading()
+	initErrorsReporting()
+	initVips()
+}
+
 func main() {
+	initialize()
+
 	go func() {
 		var logMemStats = len(os.Getenv("IMGPROXY_LOG_MEM_STATS")) > 0
 
@@ -30,12 +39,6 @@ func main() {
 			}
 		}
 	}()
-
-	if len(os.Getenv("IMGPROXY_PPROF_BIND")) > 0 {
-		go func() {
-			http.ListenAndServe(os.Getenv("IMGPROXY_PPROF_BIND"), nil)
-		}()
-	}
 
 	s := startServer()
 

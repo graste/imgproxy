@@ -1,5 +1,24 @@
 # Changelog
 
+## master
+
+- Better handling if non-sRGB images;
+- `SO_REUSEPORT` socker option support. Can be enabled with `IMGPROXY_SO_REUSEPORT`;
+- `dpr` option always changes the resulting size even if it leads to enlarge and `enlarge` is falsey;
+
+## v2.3.0
+
+- `libvips` v8.8 support: better processing of animated GIFs, built-in CMYK profile, better WebP scale-on-load, etc;
+- Animated WebP support. `IMGPROXY_MAX_GIF_FRAMES` is deprecated, use `IMGPROXY_MAX_ANIMATION_FRAMES`;
+- [HEIC support](./docs/image_formats_support.md#heic-support);
+- [crop](./docs/generating_the_url_advanced.md#crop) processing option. `resizing_type:crop` is deprecated;
+- Offsets for [gravity](./docs/generating_the_url_advanced.md#gravity);
+- Resizing type `auto`. If both source and resulting dimensions have the same orientation (portrait or landscape), imgproxy will use `fill`. Otherwise, it will use `fit`;
+- Development errors mode. When `IMGPROXY_DEVELOPMENT_ERRORS_MODE` is true, imgproxy will respond with detailed error messages. Not recommended for production because some errors may contain stack trace;
+- Better stack trace for image processing errors;
+- Allowed URL query for `/health`;
+- `IMGPROXY_KEEP_ALIVE_TIMEOUT` config.
+
 ## v2.2.13
 
 - Better shrink-on-load;
